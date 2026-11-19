@@ -36,6 +36,7 @@ jobs:
           USER_INFO: ${{ secrets.USER_INFO }}
           PUSH_KEY: ${{ secrets.PUSH_KEY }}
           BARK_ID: ${{ secrets.BARK_ID }}
+          YUKETANG_COOKIE: ${{ secrets.YUKETANG_COOKIE }}
 
   Run2:
     runs-on: ubuntu-latest
@@ -68,6 +69,7 @@ jobs:
           USER_INFO: ${{ secrets.USER_INFO }}
           PUSH_KEY: ${{ secrets.PUSH_KEY }}
           BARK_ID: ${{ secrets.BARK_ID }}
+          YUKETANG_COOKIE: ${{ secrets.YUKETANG_COOKIE }}
 
   Run3:
     runs-on: ubuntu-latest
@@ -100,3 +102,4 @@ jobs:
           USER_INFO: ${{ secrets.USER_INFO }}
           PUSH_KEY: ${{ secrets.PUSH_KEY }}
           BARK_ID: ${{ secrets.BARK_ID }}
+          YUKETANG_COOKIE: ${{ secrets.YUKETANG_COOKIE }}
