@@ -19,6 +19,11 @@ let startTime = undefined;
 const customGot = got.extend({
   cookieJar,
   timeout: 10000,
+  headers: {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    Referer: "https://changjiang.yuketang.cn/",
+  },
 });
 
 const successLessons = new Set();
@@ -38,10 +43,28 @@ const api = {
     "https://changjiang.yuketang.cn/api/v3/classroom/on-lesson",
 };
 
+// 从浏览器的 Cookie 字符串注入 cookieJar，绕过需要过腾讯防水墙的密码登录
+const loadCookieFromEnv = async () => {
+  const raw = process.env.YUKETANG_COOKIE;
+  if (!raw) return false;
+  let loaded = [];
+  for (const pair of raw.split(";")) {
+    const idx = pair.indexOf("=");
+    if (idx <= 0) continue;
+    const name = pair.slice(0, idx).trim();
+    const value = pair.slice(idx + 1).trim();
+    if (!name) continue;
+    await cookieJar.setCookie(
+      `${name}=${value}; Domain=changjiang.yuketang.cn; Path=/`,
+      "https://changjiang.yuketang.cn/"
+    );
+    loaded.push(name);
+  }
+  console.log("Cookie loaded:", loaded.join(", "));
+  return loaded.includes("sessionid");
+};
+
 const login = async (username, password) => {
-  console.log("===== DEBUG START =====");
-  console.log("DEBUG account:", JSON.stringify(username));
-  console.log("DEBUG password length:", password ? password.length : "(empty)");
   const body = await customGot(api.login, {
     method: "POST",
     json: {
@@ -50,9 +73,7 @@ const login = async (username, password) => {
       pwd: key.encrypt(password, "base64"),
     },
   }).json();
-  console.log("DEBUG login response:", JSON.stringify(body));
-  console.log("===== DEBUG END =====");
-  if (!body.success) throw new Error("login failed");
+  if (!body.success) throw new Error(`login failed: ${JSON.stringify(body)}`);
 };
 
 const getOnLessonInfo = async () => {
@@ -147,14 +168,20 @@ const execCheckIn = async () => {
 };
 
 const startUp = async () => {
+  const hasCookie = await loadCookieFromEnv();
+
+  if (hasCookie) {
+    console.log("Using browser cookie, skip password login.");
+  } else {
     const { USER_INFO } = process.env;
-   console.log("DEBUG USER_INFO shape:", JSON.stringify(USER_INFO.replace(/[^|]/g, "*")));
-  const [USERNAME, PASSWORD] = USER_INFO.split("|");
-  if (!(USERNAME && PASSWORD)) {
-    console.log("Failed: USER_INFO not provided.");
-    process.exit(0);
+    const [USERNAME, PASSWORD] = (USER_INFO || "").split("|");
+    if (!(USERNAME && PASSWORD)) {
+      console.log("Failed: neither YUKETANG_COOKIE nor USER_INFO provided.");
+      process.exit(0);
+    }
+    await login(USERNAME, PASSWORD);
   }
-  await login(USERNAME, PASSWORD);
+
   sendNotify("YukeTang: Start", new Date().toLocaleString("zh-CN"));
   execCheckIn();
 };
