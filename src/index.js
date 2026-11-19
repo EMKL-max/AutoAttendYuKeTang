@@ -19,6 +19,7 @@ let startTime = undefined;
 const customGot = got.extend({
   cookieJar,
   timeout: 15000,
+  responseType: "json",
   headers: {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -26,6 +27,24 @@ const customGot = got.extend({
   },
   throwHttpErrors: false,
 });
+
+// got 11：body 已经是解析后的对象，统一用它，绝不调用 res.json()
+const reqJson = async (url, options = {}) => {
+  try {
+    const res = await customGot(url, options);
+    let body = res.body;
+    if (typeof body === "string") {
+      try {
+        body = JSON.parse(body);
+      } catch (e) {
+        body = { raw: body.slice(0, 200) };
+      }
+    }
+    return { status: res.statusCode, body: body || {} };
+  } catch (err) {
+    return { status: 0, body: { error: err.message } };
+  }
+};
 
 const successLessons = new Set();
 
@@ -45,9 +64,8 @@ const api = {
     "https://changjiang.yuketang.cn/api/v3/classroom/on-lesson",
 };
 
-// ---------- cookie 相关 ----------
+// ---------- cookie ----------
 
-// 把 YUKETANG_COOKIE 字符串注入 cookieJar
 const loadCookieFromEnv = async () => {
   const raw = process.env.YUKETANG_COOKIE;
   if (!raw) return false;
@@ -68,44 +86,31 @@ const loadCookieFromEnv = async () => {
   return loaded.includes("sessionid");
 };
 
-// 检查当前 cookieJar 里是否已有 sessionid
-const hasSessionCookie = async () => {
-  try {
-    const str = await cookieJar.getCookieString("https://changjiang.yuketang.cn/");
-    return /(^|;\s*)sessionid=/.test(str);
-  } catch (e) {
-    return false;
-  }
-};
-
-// 用 userinfo 接口验证会话是否有效
 const verifySession = async () => {
-  try {
-    const res = await customGot(api.userinfo);
-    const body = await res.json().catch(() => ({}));
-    return {
-      ok: res.statusCode === 200 && body && (body.success === true || body.code === 0),
-      status: res.statusCode,
-      body,
-    };
-  } catch (err) {
-    return { ok: false, status: 0, body: { error: err.message } };
-  }
+  const { status, body } = await reqJson(api.userinfo);
+  const ok =
+    status === 200 &&
+    !!body &&
+    (body.success === true || body.code === 0 || !!body.data);
+  return { ok, status, body };
 };
 
-// 保活：请求一次 userinfo，让服务端续期同时检查会话
-let lastKeepAliveFailed = false;
+let keepAliveBroken = false;
 const keepAlive = async () => {
   const r = await verifySession();
   if (r.ok) {
-    if (lastKeepAliveFailed) {
+    if (keepAliveBroken) {
       console.log("Keep-alive recovered");
-      lastKeepAliveFailed = false;
+      keepAliveBroken = false;
     }
   } else {
-    console.log("Keep-alive failed:", r.status, JSON.stringify(r.body).slice(0, 200));
-    if (!lastKeepAliveFailed) {
-      lastKeepAliveFailed = true;
+    console.log(
+      "Keep-alive failed:",
+      r.status,
+      JSON.stringify(r.body).slice(0, 200)
+    );
+    if (!keepAliveBroken) {
+      keepAliveBroken = true;
       sendNotify(
         "YukeTang: Cookie 可能失效",
         `status=${r.status} ${JSON.stringify(r.body).slice(0, 200)}`
@@ -117,9 +122,8 @@ const keepAlive = async () => {
 
 // ---------- 登录 ----------
 
-// 密码登录（可能被腾讯防水墙拦截）
 const passwordLogin = async (username, password) => {
-  const res = await customGot(api.login, {
+  const { status, body } = await reqJson(api.login, {
     method: "POST",
     json: {
       type: "PP",
@@ -127,45 +131,54 @@ const passwordLogin = async (username, password) => {
       pwd: key.encrypt(password, "base64"),
     },
   });
-  const body = await res.json().catch(() => ({}));
-  console.log("Password login response:", JSON.stringify(body).slice(0, 300));
+  console.log(
+    "Password login response:",
+    status,
+    JSON.stringify(body).slice(0, 300)
+  );
   return !!(body && body.success === true);
 };
 
-// 建立会话：先试密码登录，失败则用环境变量里的 cookie
 const establishSession = async () => {
   const { USER_INFO } = process.env;
-  const [USERNAME, PASSWORD] = (USER_INFO || "").split("|").map((s) => (s || "").trim());
+  const [USERNAME, PASSWORD] = (USER_INFO || "")
+    .split("|")
+    .map((s) => (s || "").trim());
+
+  if (USERNAME && PASSWORD && process.env.YUKETANG_COOKIE === undefined) {
+    // 没有 cookie 时优先密码登录
+  }
 
   if (USERNAME && PASSWORD) {
     console.log("Trying password login...");
-    try {
-      const ok = await passwordLogin(USERNAME, PASSWORD);
-      if (ok) {
-        const v = await verifySession();
-        if (v.ok) {
-          console.log("Password login OK, session verified.");
-          return true;
-        }
-        console.log("Password login said success but session verify failed:", JSON.stringify(v.body).slice(0, 200));
-      } else {
-        console.log("Password login rejected (possibly blocked by captcha).");
+    const ok = await passwordLogin(USERNAME, PASSWORD);
+    if (ok) {
+      const v = await verifySession();
+      if (v.ok) {
+        console.log("Password login OK, session verified.");
+        return true;
       }
-    } catch (err) {
-      console.log("Password login error:", err.message);
+      console.log(
+        "Password login said success but session verify failed:",
+        JSON.stringify(v.body).slice(0, 200)
+      );
+    } else {
+      console.log("Password login rejected (possibly blocked by captcha).");
     }
   } else {
     console.log("No USER_INFO provided, skip password login.");
   }
 
-  // 回退：使用 YUKETANG_COOKIE
   if (await loadCookieFromEnv()) {
     const v = await verifySession();
     if (v.ok) {
       console.log("Using cookie from YUKETANG_COOKIE, session verified.");
       return true;
     }
-    console.log("Cookie from YUKETANG_COOKIE is invalid:", JSON.stringify(v.body).slice(0, 200));
+    console.log(
+      "Cookie from YUKETANG_COOKIE is invalid:",
+      JSON.stringify(v.body).slice(0, 200)
+    );
   } else {
     console.log("No YUKETANG_COOKIE provided.");
   }
@@ -176,8 +189,7 @@ const establishSession = async () => {
 // ---------- 查课 / 签到 ----------
 
 const getOnLessonInfo = async () => {
-  const res = await customGot(api.getOnLessonData);
-  const body = await res.json().catch(() => ({}));
+  const { body } = await reqJson(api.getOnLessonData);
   const { data, success } = body;
   if (!success || !data) return false;
   const on_lessons = data.on_lessons;
@@ -185,8 +197,7 @@ const getOnLessonInfo = async () => {
 };
 
 const getOnLessonInfoV3 = async () => {
-  const res = await customGot(api.getOnLessonDataV3);
-  const body = await res.json().catch(() => ({}));
+  const { body } = await reqJson(api.getOnLessonDataV3);
   const { data, code } = body;
   if ((code !== 0 && code !== undefined) || !data) return false;
   const onLessonClassrooms = data.onLessonClassrooms;
@@ -195,18 +206,14 @@ const getOnLessonInfoV3 = async () => {
     : false;
 };
 
-const attendLessonV3Request = (lessonId) =>
-  customGot(api.attendLessonV3, {
+const attendLessonV3 = async ({ lessonId, classroomId, courseName }) => {
+  const { body: data } = await reqJson(api.attendLessonV3, {
     method: "POST",
     json: {
       source: 1,
       lessonId,
     },
   });
-
-const attendLessonV3 = async ({ lessonId, classroomId, courseName }) => {
-  const res = await attendLessonV3Request(lessonId);
-  const data = await res.json().catch(() => ({}));
   const { code } = data;
   const success = code === 0;
   if (success) {
@@ -222,10 +229,9 @@ const attendLessonV3 = async ({ lessonId, classroomId, courseName }) => {
 };
 
 const attendLesson = async ({ lesson_id, classroom }) => {
-  const res = await customGot(api.attendLesson, {
+  const { body: data } = await reqJson(api.attendLesson, {
     searchParams: { lesson_id, source: 1 },
   });
-  const data = await res.json().catch(() => ({}));
   const name = classroom?.course?.name;
   const { success } = data;
   if (success) {
@@ -255,7 +261,6 @@ const execCheckIn = async () => {
   }
   setTimeout(execCheckIn, 1000 * 20);
 
-  // 每 15 次轮询（约 5 分钟）做一次保活 + 会话检查
   if (count % 15 === 1) {
     const ok = await keepAlive();
     if (!ok) {
@@ -283,11 +288,15 @@ const execCheckIn = async () => {
   try {
     lessonInfo &&
       lessonInfo.forEach((lesson) =>
-        attendLesson(lesson).catch((e) => console.log("attendLesson err:", e.message))
+        attendLesson(lesson).catch((e) =>
+          console.log("attendLesson err:", e.message)
+        )
       );
     lessonInfoV3 &&
       lessonInfoV3.forEach((lesson) =>
-        attendLessonV3(lesson).catch((e) => console.log("attendLessonV3 err:", e.message))
+        attendLessonV3(lesson).catch((e) =>
+          console.log("attendLessonV3 err:", e.message)
+        )
       );
   } catch (err) {
     console.log("Attend Failed:", err.message || err);
