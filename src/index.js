@@ -39,6 +39,9 @@ const api = {
 };
 
 const login = async (username, password) => {
+  console.log("===== DEBUG START =====");
+  console.log("DEBUG account:", JSON.stringify(username));
+  console.log("DEBUG password length:", password ? password.length : "(empty)");
   const body = await customGot(api.login, {
     method: "POST",
     json: {
@@ -47,6 +50,8 @@ const login = async (username, password) => {
       pwd: key.encrypt(password, "base64"),
     },
   }).json();
+  console.log("DEBUG login response:", JSON.stringify(body));
+  console.log("===== DEBUG END =====");
   if (!body.success) throw new Error("login failed");
 };
 
@@ -142,7 +147,9 @@ const execCheckIn = async () => {
 };
 
 const startUp = async () => {
-  const { USER_INFO } = process.env;
+    const { USER_INFO } = process.env;
+  console.log("DEBUG raw USER_INFO:", JSON.stringify(USER_INFO));
+  const [USERNAME, PASSWORD] = USER_INFO.split("|");
   const [USERNAME, PASSWORD] = USER_INFO.split("|");
   if (!(USERNAME && PASSWORD)) {
     console.log("Failed: USER_INFO not provided.");
