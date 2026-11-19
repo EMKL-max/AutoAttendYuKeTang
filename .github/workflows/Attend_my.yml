@@ -19,11 +19,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: node_modules
-          key: ${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+          key: ${{ runner.os }}-npm-${{ hashFiles('package-lock.json') }}
           restore-keys: |
-            ${{ runner.os }}-
+            ${{ runner.os }}-npm-
       - name: Install dependencies
-        run: yarn install --frozen-lockfile || yarn
+        run: npm install
       - name: Run
         run: node src/index.js
         env:
@@ -45,11 +45,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: node_modules
-          key: ${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+          key: ${{ runner.os }}-npm-${{ hashFiles('package-lock.json') }}
           restore-keys: |
-            ${{ runner.os }}-
+            ${{ runner.os }}-npm-
       - name: Install dependencies
-        run: yarn install --frozen-lockfile || yarn
+        run: npm install
       - name: Run
         run: node src/index.js
         env:
@@ -71,11 +71,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: node_modules
-          key: ${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+          key: ${{ runner.os }}-npm-${{ hashFiles('package-lock.json') }}
           restore-keys: |
-            ${{ runner.os }}-
+            ${{ runner.os }}-npm-
       - name: Install dependencies
-        run: yarn install --frozen-lockfile || yarn
+        run: npm install
       - name: Run
         run: node src/index.js
         env:
