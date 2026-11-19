@@ -148,8 +148,7 @@ const execCheckIn = async () => {
 
 const startUp = async () => {
     const { USER_INFO } = process.env;
-  console.log("DEBUG raw USER_INFO:", JSON.stringify(USER_INFO));
-  const [USERNAME, PASSWORD] = USER_INFO.split("|");
+   console.log("DEBUG USER_INFO shape:", JSON.stringify(USER_INFO.replace(/[^|]/g, "*")));
   const [USERNAME, PASSWORD] = USER_INFO.split("|");
   if (!(USERNAME && PASSWORD)) {
     console.log("Failed: USER_INFO not provided.");
